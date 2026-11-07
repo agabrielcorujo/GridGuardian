@@ -5,6 +5,8 @@ yarn-error.log*
 .eslintcache
 
 .venv
+__pycache__/
+*.pyc
 .env
 aws-resources.env
 

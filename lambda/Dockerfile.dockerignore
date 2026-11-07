@@ -1,0 +1,7 @@
+# Build from the repository root; send only worker source and the analysis prompt.
+**
+!lambda/
+!lambda/handler.py
+!lambda/requirements.txt
+!lambda/Dockerfile
+!lambda/prompt.txt
