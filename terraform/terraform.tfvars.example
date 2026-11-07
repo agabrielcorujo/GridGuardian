@@ -1,0 +1,15 @@
+aws_region   = "us-east-1"
+project_name = "gridguardian"
+environment  = "dev"
+
+images_bucket_name = "grid-guardian-images"
+reports_table_name = "GridGuardian"
+
+# First apply: leave this null to provision infrastructure without Lambda.
+# After pushing the worker to ECR: replace null with its immutable image tag.
+image_tag = null
+
+image_prefix       = "images/"
+bedrock_model_id    = "us.amazon.nova-2-lite-v1:0"
+lambda_timeout     = 180
+lambda_memory_size = 512
