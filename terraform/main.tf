@@ -56,11 +56,6 @@ resource "aws_ecr_repository_policy" "analyzer" {
   })
 }
 
-resource "aws_cloudwatch_log_group" "analyzer" {
-  name              = "/aws/lambda/${local.function_name}"
-  retention_in_days = 14
-}
-
 # Captures exhausted asynchronous invocations; this is not an input queue.
 resource "aws_sqs_queue" "analysis_failures" {
   name                      = "${local.name}-analysis-failures"
@@ -112,12 +107,6 @@ resource "aws_iam_role_policy" "analyzer" {
         Condition = {
           StringEquals = { "bedrock:InferenceProfileArn" = local.inference_profile }
         }
-      },
-      {
-        Sid      = "WriteWorkerLogs"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${aws_cloudwatch_log_group.analyzer.arn}:*"
       },
       {
         Sid      = "CaptureFailedAnalysis"

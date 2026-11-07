@@ -6,3 +6,14 @@ yarn-error.log*
 
 .venv
 .env
+aws-resources.env
+
+# Terraform local state, caches, plans, and environment-specific values
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log

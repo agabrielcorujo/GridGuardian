@@ -5,13 +5,12 @@ S3 images/ upload -> Lambda container -> Bedrock Nova
                           |                 |
                           +-- JSON report <-+
                           +-- DynamoDB GridGuardian (report_id)
-                          +-- CloudWatch logs
                           +-- SQS failure destination
 ```
 
 This stack references the existing S3 bucket `grid-guardian-images` and DynamoDB table `GridGuardian` in `us-east-1`. The table's partition key is `report_id` (String), with no sort key. Terraform reads these resources as data sources: it does not recreate, import, delete, or change their storage settings, policies, encryption, backups, or tags. In particular, it does not enable PITR on the existing table.
 
-It provisions an immutable-tag ECR repository, the Lambda execution role, logs, and a failed-invocation queue. Once a worker image is provided, it also provisions Lambda and its authorized S3 upload trigger. The role can read the image prefix in the existing bucket, read/write the existing reports table, invoke the selected US Nova inference profile, write logs, and send failure records. Bucket and table names can be overridden in tfvars. Use a separate existing bucket/table for each environment that needs isolated data.
+It provisions an immutable-tag ECR repository, the Lambda execution role, and a failed-invocation queue. Once a worker image is provided, it also provisions Lambda and its authorized S3 upload trigger. The role can read the image prefix in the existing bucket, read/write the existing reports table, invoke the selected US Nova inference profile, and send failure records. Bucket and table names can be overridden in tfvars. Use a separate existing bucket/table for each environment that needs isolated data.
 
 The API, frontend, GitHub Actions workflow, and worker Dockerfile/handler are outside this infrastructure stack. The worker still needs to be implemented. Bedrock is a managed service called by the worker. The deployment identity must have permission to create these resources, pass the Lambda execution role, and read ECR images/manage the repository policy. Organization policies, model availability, and Bedrock quotas still apply.
 
@@ -69,7 +68,7 @@ Terraform resolves the tag to its digest for reproducible deployment. Subsequent
 - Preserve report ID, capture time, and GPS in S3 object metadata at upload, or create the report record before uploading. Notifications do not contain that custom metadata; fetch it with the object or read the report. Store validated model JSON fields as DynamoDB attributes alongside metadata and the image reference.
 - Use stable `report_id` values and conditional database claims for retry-safe processing. S3 events may be duplicated or delivered out of order. A stable ID alone does not prevent duplicate model calls. Recover abandoned claims and skip completed reports.
 - Call Bedrock Converse, validate JSON/classification fields, and raise processing errors to trigger retries. Set SDK timeouts and output token limits to fit the Lambda timeout.
-- Lambda retries function errors twice. Exhausted asynchronous invocations go to SQS as failure records. Monitor CloudWatch and the queue; manual replay must extract the original event from `requestPayload`. Automatic replay and alarm notifications are not configured.
+- Lambda retries function errors twice. Exhausted asynchronous invocations go to SQS as failure records. Inspect the queue for failures; manual replay must extract the original event from `requestPayload`. Automatic replay and alarm notifications are not configured.
 - No input queue or concurrency cap is configured. For sustained uploads, add an SQS input queue and configure concurrency against Bedrock quotas.
 
 The report table supports lookup by `report_id`. Add secondary indexes after defining flight, pole, classification, and time query patterns for the dashboard.
