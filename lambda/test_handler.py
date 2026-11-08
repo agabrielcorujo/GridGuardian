@@ -1,5 +1,6 @@
 import copy
 import io
+import json
 import os
 import unittest
 from unittest.mock import Mock, patch
@@ -50,6 +51,43 @@ class ReportDestinationTests(unittest.TestCase):
                     result = handler.fetch_image(s3, record)
                     self.assertEqual(result[0], payload)
                     self.assertEqual(result[1], expected)
+
+    def test_parse_plain_and_markdown_wrapped_json(self):
+        text = json.dumps(self.analysis)
+        for response in (text, "\ufeff  " + text, f"```json\n{text}\n```", f"```\n{text}\n```"):
+            with self.subTest(response=response):
+                self.assertEqual(handler.parse_analysis_response(response), self.analysis)
+
+    def test_parse_rejects_empty_malformed_or_schema_invalid_output(self):
+        for text in ("", "  ", "```json\n\n```", "This image looks healthy.", '{"classification":', "{}", "[]"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                with patch.object(handler.logger, "warning"):
+                    handler.parse_analysis_response(text)
+
+    def test_converse_extracts_text_blocks_and_accepts_fenced_json(self):
+        bedrock = Mock()
+        text = "```json\n" + json.dumps(self.analysis) + "\n```"
+        bedrock.converse.return_value = {
+            "stopReason": "end_turn",
+            "output": {"message": {"content": [
+                {"reasoningContent": {"reasoningText": {"text": "internal", "signature": "test"}}},
+                {"text": text[:20]}, {"text": text[20:]},
+            ]}},
+        }
+        with patch.dict(os.environ, {"BEDROCK_MODEL_ID": "us.amazon.nova-2-lite-v1:0"}), \
+             patch.object(handler, "system_prompt", return_value="Return JSON."):
+            self.assertEqual(handler.analyze_image(bedrock, b"image", "jpeg", "report", self.metadata), self.analysis)
+
+    def test_converse_empty_or_truncated_response_is_not_saved(self):
+        bedrock = Mock()
+        with patch.dict(os.environ, {"BEDROCK_MODEL_ID": "us.amazon.nova-2-lite-v1:0"}), \
+             patch.object(handler, "system_prompt", return_value="Return JSON."):
+            for reason, content in (("end_turn", []), ("max_tokens", [{"text": "{"}])):
+                bedrock.converse.return_value = {
+                    "stopReason": reason, "output": {"message": {"content": content}},
+                }
+                with self.subTest(reason=reason), self.assertRaises(ValueError):
+                    handler.analyze_image(bedrock, b"image", "jpeg", "report", self.metadata)
 
     def test_zipcode_preserves_leading_zeros_and_rejects_missing_values(self):
         self.assertEqual(self.metadata["zipcode"], "00901")
