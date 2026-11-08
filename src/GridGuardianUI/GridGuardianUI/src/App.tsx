@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, Filter, LayoutDashboard, MapPin, Radio, RefreshCw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, X, Zap } from 'lucide-react'
+import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, Filter, LayoutDashboard, MapPin, Radio, RefreshCw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
 import InspectionMap from './components/InspectionMap'
 import InspectionImage from './components/InspectionImage'
 import { categories, categoryOf, colors, dateLabel, initialFilters, labels, reportKey, request } from './api'
@@ -92,7 +92,7 @@ function App() {
   const dailyMax = Math.max(1, ...(analytics?.daily.map(d => categories.reduce((n, c) => n + d[c], 0)) ?? []))
   const navigation = [{ id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'map', label: 'Infrastructure map', icon: MapPin }, { id: 'reports', label: 'Inspections', icon: ClipboardList }]
   return <div className="app-shell">
-    <aside className="sidebar"><a className="brand" href="#" aria-label="GridGuardian overview" onClick={e => { e.preventDefault(); setView('overview') }}><span className="brand-mark"><Zap size={22} fill="currentColor" /></span><span>Grid<span className="brand-light">Guardian</span><small>INFRASTRUCTURE INTELLIGENCE</small></span></a>
+    <aside className="sidebar"><a className="brand" href="#" aria-label="GridGuardian overview" onClick={e => { e.preventDefault(); setView('overview') }}><span className="brand-mark"><img src="/gridguardian.svg" alt="" aria-hidden="true" /></span><span>Grid<span className="brand-light">Guardian</span><small>INFRASTRUCTURE INTELLIGENCE</small></span></a>
       <div className="workspace"><span className="workspace-icon">PR</span><div>Puerto Rico<small>Utility operations</small></div><Radio size={15} /></div>
       <p className="nav-label">WORKSPACE</p><nav>{navigation.map(n => <button key={n.id} className={view === n.id ? 'nav-item active' : 'nav-item'} onClick={() => setView(n.id)}><n.icon size={18} />{n.label}{view === n.id && <span className="nav-dot" />}</button>)}</nav>
       <div className="sidebar-bottom"><div className="region-note"><span className="eyebrow">A CLEARER PICTURE</span><p>Better visibility.<br />Stronger infrastructure.</p><span>Drone-powered visual assessments</span><ShieldCheck size={25} /></div><button className="help-button" onClick={() => setHelp(true)}><CircleHelp size={18} /> Dashboard guide <ArrowUpRight size={15} /></button><div className="sidebar-footer"><span className="live-dot" /> GridGuardian <span>v1.0</span></div></div>
