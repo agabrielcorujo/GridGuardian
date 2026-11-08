@@ -1,13 +1,3 @@
-variable "api_image_digest" {
-  description = "Digest of the first published API image, from the GitHub Actions summary. Used for creation; GitHub Actions deploys subsequent images."
-  type        = string
-
-  validation {
-    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.api_image_digest))
-    error_message = "Supply the published API image digest: sha256: followed by 64 lowercase hexadecimal characters."
-  }
-}
-
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/aws/lambda/GridGuardianAPI"
   retention_in_days = 14
@@ -72,18 +62,4 @@ resource "aws_lambda_function" "api" {
     aws_iam_role_policy.api,
     aws_cloudwatch_log_group.api,
   ]
-}
-
-resource "aws_iam_role_policy" "github_api_deploy" {
-  name = "deploy-gridguardian-api"
-  role = aws_iam_role.github_ecr_push.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid      = "DeployAPIImage"
-      Effect   = "Allow"
-      Action   = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:UpdateFunctionCode"]
-      Resource = aws_lambda_function.api.arn
-    }]
-  })
 }

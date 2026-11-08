@@ -1,10 +1,79 @@
 # GridGuardian infrastructure
 
+<<<<<<< HEAD
 `aws-infra` is the shared branch for all Terraform changes, including the
 analyzer and API. Both Adrian and Pablo must pull this branch before planning
 or applying. Do not apply the older Terraform configuration from `api`.
 
 ## Synchronize an existing checkout
+=======
+Run Terraform from this directory using the existing local `terraform.tfstate`.
+Keep the local state and its backup. Never commit state, `.terraform/`, or plan
+files. Commit `.terraform.lock.hcl` and the `.tf` source files.
+
+## File layout
+
+All `.tf` files here belong to one root module and share the same state.
+
+| File | Contents |
+| --- | --- |
+| `versions.tf` | Terraform and AWS provider version requirements |
+| `providers.tf` | AWS region, allowed account, and default tags |
+| `variables.tf` | Input variables, including the initial API image digest |
+| `api.tf` | API Lambda, execution role and policy, and log group |
+| `analyzer.tf` | Analyzer execution role and policy |
+| `github.tf` | GitHub OIDC provider, publishing role, and deployment permissions |
+| `ecr.tf` | Shared image repository and Lambda retrieval policy |
+| `dynamodb.tf` | Reports table |
+| `sqs.tf` | Analysis failure queue |
+| `outputs.tf` | Infrastructure outputs |
+
+Resource blocks were regrouped from `main.tf`, `existing.tf`, and `api.tf`
+without changing their addresses or configuration. Keep existing resource labels
+and instance keys, including `aws_iam_openid_connect_provider.github[0]`.
+This file reorganization requires no imports, state moves, or infrastructure apply.
+
+## Verify organization changes and refresh state
+
+Use the existing state and real `api_image_digest` input. Do not initialize a
+new empty state to replace the existing state. Run:
+
+```sh
+export AWS_PROFILE=379810014574_TerraformAccess
+terraform init -lockfile=readonly
+terraform fmt -check
+terraform validate
+terraform plan
+```
+
+Review the regular plan for zero infrastructure changes. Refresh-only mode does
+not check whether configuration changes would modify infrastructure. If the
+regular plan proposes changes, investigate them before proceeding; do not apply
+them as part of a file reorganization.
+
+To separately refresh state from AWS without changing cloud resources:
+
+```sh
+terraform plan -refresh-only -out=refresh.tfplan
+terraform show refresh.tfplan
+terraform apply refresh.tfplan
+```
+
+Review the refresh plan before applying it. Applying the saved refresh-only plan
+updates Terraform state and outputs to reflect AWS; it does not deploy changes.
+
+## First deployment
+
+1. Commit and push the API source, requirements, Dockerfile, and GitHub workflow
+   on `api` or `main`. The workflow publishes an `api-*` image to the shared ECR
+   repository. If the function does not exist, the workflow records that setup is
+   pending and leaves the published image ready. If deployment permissions are
+   missing, the workflow fails after publishing; apply Terraform and rerun it.
+2. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace its placeholder
+   with the API image digest from the Actions summary (`sha256:...`, without the
+   repository prefix). Use the API image, not an analyzer image.
+3. Run:
+>>>>>>> 230aa06 (updated terraform directory so its more intuitive)
 
 ```sh
 git switch aws-infra

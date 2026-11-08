@@ -1,3 +1,4 @@
+<<<<<<< HEAD:terraform/main.tf
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
@@ -215,4 +216,17 @@ resource "aws_s3_bucket_notification" "images" {
   }
 
   depends_on = [aws_lambda_permission.s3_upload, aws_lambda_function_event_invoke_config.analyzer]
+=======
+provider "aws" {
+  region              = "us-east-1"
+  allowed_account_ids = ["379810014574"]
+
+  default_tags {
+    tags = {
+      Environment = "dev"
+      ManagedBy   = "Terraform"
+      Project     = "gridguardian"
+    }
+  }
+>>>>>>> 230aa06 (updated terraform directory so its more intuitive):terraform/providers.tf
 }

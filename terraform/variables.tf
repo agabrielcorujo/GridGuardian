@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 variable "github_repository" {
   description = "GitHub owner/repository allowed to publish worker images through OIDC."
   type        = string
@@ -151,5 +152,14 @@ variable "lambda_memory_size" {
   validation {
     condition     = var.lambda_memory_size >= 128 && var.lambda_memory_size <= 10240 && floor(var.lambda_memory_size) == var.lambda_memory_size
     error_message = "Memory must be a whole number between 128 and 10240 MB."
+=======
+variable "api_image_digest" {
+  description = "Digest of the first published API image, from the GitHub Actions summary. Used for creation; GitHub Actions deploys subsequent images."
+  type        = string
+
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.api_image_digest))
+    error_message = "Supply the published API image digest: sha256: followed by 64 lowercase hexadecimal characters."
+>>>>>>> 230aa06 (updated terraform directory so its more intuitive)
   }
 }
