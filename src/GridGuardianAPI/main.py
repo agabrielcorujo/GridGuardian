@@ -1,6 +1,218 @@
-def main():
-    print("Hello from gridguardianapi!")
+"""Read-only inspection API; image analysis is owned by the upload worker."""
+from collections import Counter
+from datetime import datetime, timezone
+from functools import lru_cache
+from math import isfinite
+import logging
+import os
+from typing import Literal
+
+import boto3
+from boto3.dynamodb.conditions import Key
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
+
+app = FastAPI(title="GridGuardian API", version="0.2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_methods=["GET"], allow_headers=["*"],
+)
+Classification = Literal["HEALTHY", "MAINTENANCE", "DAMAGES", "UNASSESSED"]
+Severity = Literal["NONE", "MEDIUM", "HIGH", "UNKNOWN"]
+CLASSES = ("HEALTHY", "MAINTENANCE", "DAMAGES", "UNASSESSED")
+ZIP_PATTERN = r"^[0-9]{5}(?:-[0-9]{4})?$"
+logger = logging.getLogger(__name__)
 
 
-if __name__ == "__main__":
-    main()
+@lru_cache
+def get_table():
+    return boto3.resource("dynamodb").Table(os.getenv("TABLE_NAME", "GridGuardian"))
+
+
+def parse_time(value):
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def filters(
+    classification: Classification | None = None,
+    severity: Severity | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    flight_id: str | None = None,
+    pole_id: str | None = None,
+):
+    try:
+        start_time = parse_time(start) if start else None
+        end_time = parse_time(end) if end else None
+    except ValueError as exc:
+        raise HTTPException(422, "start/end must be ISO 8601 timestamps with timezone") from exc
+    if start_time and end_time and start_time > end_time:
+        raise HTTPException(422, "start must be before or equal to end")
+    return dict(classification=classification, severity=severity, start=start_time,
+                end=end_time, flight_id=flight_id, pole_id=pole_id)
+
+
+def coordinates(report):
+    location = report.get("location") or {}
+    try:
+        lat, lon = float(location["latitude"]), float(location["longitude"])
+        if isfinite(lat) and isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180:
+            return [lon, lat]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
+def matching_reports(zipcode, selection, table):
+    condition = Key("zipcode").eq(zipcode)
+    if selection["classification"]:
+        condition &= Key("condition-timestamp").begins_with(selection["classification"] + "-")
+    kwargs = {"KeyConditionExpression": condition}
+    reports = []
+    try:
+        while True:
+            page = table.query(**kwargs)
+            for item in page.get("Items", []):
+                key = item.get("condition-timestamp", "")
+                # Control items use REPORT-<source_id>; only condition-prefixed items are reports.
+                category = next((c for c in CLASSES if key.startswith(c + "-")), None)
+                if category is None:
+                    continue
+                if selection["classification"] and category != selection["classification"]:
+                    continue
+                if any(selection[f] is not None and item.get(f) != selection[f]
+                       for f in ("severity", "flight_id", "pole_id")):
+                    continue
+                timestamp = item.get("timestamp") or key[len(category) + 1:]
+                try:
+                    observed = parse_time(timestamp)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                if selection["start"] and observed < selection["start"]:
+                    continue
+                if selection["end"] and observed > selection["end"]:
+                    continue
+                reports.append({**item, "timestamp": observed.isoformat().replace("+00:00", "Z"),
+                                "classification": None if category == "UNASSESSED" else category})
+            if not page.get("LastEvaluatedKey"):
+                break
+            kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    except (BotoCoreError, ClientError):
+        logger.exception("Failed to query inspection reports")
+        raise HTTPException(503, "Reports are temporarily unavailable")
+    reports.sort(key=lambda r: (parse_time(r["timestamp"]), r["condition-timestamp"]), reverse=True)
+    return reports
+
+
+@app.get("/")
+def root():
+    return {"message": "GridGuardian API running!"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+
+@app.get("/reports/{zipcode}")
+def get_reports(
+    zipcode: str = Path(pattern=ZIP_PATTERN),
+    selection: dict = Depends(filters), table=Depends(get_table),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    reports = matching_reports(zipcode, selection, table)
+    following = offset + limit
+    return {"items": reports[offset:following], "total": len(reports),
+            "next_offset": following if following < len(reports) else None}
+
+
+@app.get("/analytics/{zipcode}")
+def analytics(zipcode: str = Path(pattern=ZIP_PATTERN),
+              selection: dict = Depends(filters), table=Depends(get_table)):
+    reports = matching_reports(zipcode, selection, table)
+    counts = Counter(r["classification"] or "UNASSESSED" for r in reports)
+    assessed = len(reports) - counts["UNASSESSED"]
+    daily = {}
+    for report in reports:
+        day = report["timestamp"][:10]
+        daily.setdefault(day, Counter())[report["classification"] or "UNASSESSED"] += 1
+    mapped = sum(coordinates(r) is not None for r in reports)
+    return {
+        "total_images": len(reports), "assessed_images": assessed,
+        "by_classification": {c: counts[c] for c in CLASSES},
+        "attention_required": counts["MAINTENANCE"] + counts["DAMAGES"],
+        "healthy_percentage": round(100 * counts["HEALTHY"] / assessed, 2) if assessed else None,
+        "images_with_location": mapped, "images_without_location": len(reports) - mapped,
+        "daily": [{"date": day, **{c: values[c] for c in CLASSES}}
+                  for day, values in sorted(daily.items())],
+        "latest_observation": reports[0]["timestamp"] if reports else None,
+    }
+
+
+@app.get("/map/{zipcode}")
+def map_reports(zipcode: str = Path(pattern=ZIP_PATTERN),
+                selection: dict = Depends(filters), table=Depends(get_table)):
+    reports = matching_reports(zipcode, selection, table)
+    features = []
+    for report in reports:
+        point = coordinates(report)
+        if point is not None:
+            features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": point},
+                             "properties": report})
+    return {"type": "FeatureCollection", "features": features,
+            "total_images": len(reports), "images_without_location": len(reports) - len(features)}
+
+
+@lru_cache
+def get_s3():
+    return boto3.client("s3")
+
+
+@app.get("/reports/{zipcode}/image")
+def report_image(
+    zipcode: str = Path(pattern=ZIP_PATTERN),
+    sort_key: str = Query(min_length=1, max_length=1024),
+    table=Depends(get_table), s3=Depends(get_s3),
+):
+    """Resolve S3 references from a report, never from caller-supplied bucket/key values."""
+    if not any(sort_key.startswith(category + "-") for category in CLASSES):
+        raise HTTPException(404, "Image not found")
+    try:
+        result = table.query(
+            KeyConditionExpression=Key("zipcode").eq(zipcode) & Key("condition-timestamp").eq(sort_key),
+            Limit=1,
+        )
+        items = result.get("Items", [])
+        if not items:
+            raise HTTPException(404, "Report not found")
+        report = items[0]
+        bucket, key = report.get("image_s3_bucket"), report.get("image_s3_key")
+        allowed_bucket = os.getenv("IMAGE_BUCKET", "grid-guardian-images")
+        prefix = os.getenv("IMAGE_PREFIX", "images/")
+        if bucket != allowed_bucket or not isinstance(key, str) or not key.startswith(prefix):
+            raise HTTPException(404, "No image available for this report")
+        params = {"Bucket": bucket, "Key": key}
+        if report.get("image_version_id"):
+            params["VersionId"] = report["image_version_id"]
+        # Verify existence and read permission before returning a link that would fail in the browser.
+        s3.head_object(**params)
+        url = s3.generate_presigned_url("get_object", Params=params, ExpiresIn=300)
+        return {"url": url, "expires_in": 300}
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NoSuchVersion", "NotFound"}:
+            raise HTTPException(404, "Image not found") from exc
+        logger.exception("Failed to access inspection image")
+        raise HTTPException(503, "Image access is temporarily unavailable") from exc
+    except BotoCoreError as exc:
+        logger.exception("Failed to create inspection image link")
+        raise HTTPException(503, "Image access is temporarily unavailable") from exc
+
+
+handler = Mangum(app)
