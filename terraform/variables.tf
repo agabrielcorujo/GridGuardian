@@ -9,6 +9,28 @@ variable "github_repository" {
   }
 }
 
+variable "github_owner_id" {
+  description = "Immutable numeric GitHub owner ID used in this repository's OIDC subject."
+  type        = string
+  default     = "148304752"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "Use the numeric GitHub owner ID."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable numeric GitHub repository ID used in its OIDC subject."
+  type        = string
+  default     = "1449534292"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "Use the numeric GitHub repository ID."
+  }
+}
+
 variable "github_publish_branches" {
   description = "Branches trusted to assume the ECR publishing role. Keep aligned with workflow triggers and job condition."
   type        = list(string)

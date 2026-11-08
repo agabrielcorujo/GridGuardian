@@ -17,8 +17,8 @@ from botocore.exceptions import ClientError
 
 MAX_IMAGE_BYTES = 3_932_160
 SEVERITIES = {
-    "HEALTHY": "NONE", "OBSTRUCTED": "MEDIUM", "DAMAGED": "HIGH",
-    "DESTROYED": "CRITICAL", "UNKNOWN": "UNKNOWN",
+    "HEALTHY": "NONE", "MAINTENANCE": "MEDIUM", "DAMAGES": "HIGH",
+    None: "UNKNOWN",
 }
 ANALYSIS_FIELDS = {
     "infrastructure_detected", "classification", "severity",
@@ -132,14 +132,16 @@ def validate_analysis(analysis):
     if not isinstance(analysis, dict) or set(analysis) != ANALYSIS_FIELDS:
         raise ValueError("Model response does not match the expected analysis fields")
     classification = analysis["classification"]
-    if not isinstance(classification, str) or classification not in SEVERITIES:
+    if classification is not None and (
+        not isinstance(classification, str) or classification not in SEVERITIES
+    ):
         raise ValueError("Invalid classification")
     if analysis["severity"] != SEVERITIES[classification]:
         raise ValueError("Severity does not match classification")
     if type(analysis["infrastructure_detected"]) is not bool:
         raise ValueError("infrastructure_detected must be Boolean")
-    if not analysis["infrastructure_detected"] and classification != "UNKNOWN":
-        raise ValueError("Undetected infrastructure must be UNKNOWN")
+    if not analysis["infrastructure_detected"] and classification is not None:
+        raise ValueError("Undetected infrastructure must have a null classification")
     issues = analysis["issues_detected"]
     if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
         raise ValueError("issues_detected must be a list of strings")
