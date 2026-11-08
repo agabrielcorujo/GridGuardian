@@ -60,7 +60,7 @@ installs. No deployment or publishing is performed by this project setup.
 
 ## Vercel deployment
 
-Import `agabrielcorujo/GridGuardian` from GitHub and use `ui` as the production
+Import `agabrielcorujo/GridGuardian` from GitHub and use `main` as the production
 branch. Set the project root directory to `src/GridGuardianUI/GridGuardianUI`.
 The checked-in `vercel.json` configures Vite, `npm ci`, `npm run build`, and
 `dist`; package.json selects Node 22.x.
@@ -71,5 +71,5 @@ environment files or AWS credentials. The API remains hosted on AWS Lambda;
 image links are issued by the API, so Vercel needs no S3 credentials.
 
 After deployment verify ZIP 00901 analytics, map tiles and markers, an image
-preview, report pagination, and CSV export. Production pushes to `ui` should
+preview, report pagination, and CSV export. Production pushes to `main` should
 redeploy automatically once the Vercel GitHub integration is connected.

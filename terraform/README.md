@@ -1,83 +1,14 @@
 # GridGuardian infrastructure
 
-<<<<<<< HEAD
-`aws-infra` is the shared branch for all Terraform changes, including the
-analyzer and API. Both Adrian and Pablo must pull this branch before planning
+`main` is the shared branch for all Terraform changes, including the
+analyzer and API. Both Adrian and Pablo must pull main before planning
 or applying. Do not apply the older Terraform configuration from `api`.
 
 ## Synchronize an existing checkout
-=======
-Run Terraform from this directory using the existing local `terraform.tfstate`.
-Keep the local state and its backup. Never commit state, `.terraform/`, or plan
-files. Commit `.terraform.lock.hcl` and the `.tf` source files.
-
-## File layout
-
-All `.tf` files here belong to one root module and share the same state.
-
-| File | Contents |
-| --- | --- |
-| `versions.tf` | Terraform and AWS provider version requirements |
-| `providers.tf` | AWS region, allowed account, and default tags |
-| `variables.tf` | Input variables, including the initial API image digest |
-| `api.tf` | API Lambda, execution role and policy, and log group |
-| `analyzer.tf` | Analyzer execution role and policy |
-| `github.tf` | GitHub OIDC provider, publishing role, and deployment permissions |
-| `ecr.tf` | Shared image repository and Lambda retrieval policy |
-| `dynamodb.tf` | Reports table |
-| `sqs.tf` | Analysis failure queue |
-| `outputs.tf` | Infrastructure outputs |
-
-Resource blocks were regrouped from `main.tf`, `existing.tf`, and `api.tf`
-without changing their addresses or configuration. Keep existing resource labels
-and instance keys, including `aws_iam_openid_connect_provider.github[0]`.
-This file reorganization requires no imports, state moves, or infrastructure apply.
-
-## Verify organization changes and refresh state
-
-Use the existing state and real `api_image_digest` input. Do not initialize a
-new empty state to replace the existing state. Run:
 
 ```sh
-export AWS_PROFILE=379810014574_TerraformAccess
-terraform init -lockfile=readonly
-terraform fmt -check
-terraform validate
-terraform plan
-```
-
-Review the regular plan for zero infrastructure changes. Refresh-only mode does
-not check whether configuration changes would modify infrastructure. If the
-regular plan proposes changes, investigate them before proceeding; do not apply
-them as part of a file reorganization.
-
-To separately refresh state from AWS without changing cloud resources:
-
-```sh
-terraform plan -refresh-only -out=refresh.tfplan
-terraform show refresh.tfplan
-terraform apply refresh.tfplan
-```
-
-Review the refresh plan before applying it. Applying the saved refresh-only plan
-updates Terraform state and outputs to reflect AWS; it does not deploy changes.
-
-## First deployment
-
-1. Commit and push the API source, requirements, Dockerfile, and GitHub workflow
-   on `api` or `main`. The workflow publishes an `api-*` image to the shared ECR
-   repository. If the function does not exist, the workflow records that setup is
-   pending and leaves the published image ready. If deployment permissions are
-   missing, the workflow fails after publishing; apply Terraform and rerun it.
-2. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace its placeholder
-   with the API image digest from the Actions summary (`sha256:...`, without the
-   repository prefix). Use the API image, not an analyzer image.
-3. Run:
->>>>>>> 230aa06 (updated terraform directory so its more intuitive)
-
-```sh
-git switch aws-infra
-git pull --ff-only origin aws-infra
+git switch main
+git pull --ff-only origin main
 cd terraform
 export AWS_PROFILE=379810014574_TerraformAccess
 terraform init
@@ -122,7 +53,8 @@ from infrastructure applies. Do not apply from both states.
 
 `GridGuardianAPI` uses the existing ECR repository, Python `main.handler`,
 `x86_64`, 256 MB, a 15-second timeout, and `TABLE_NAME=GridGuardian`. Its role
-allows DynamoDB Query/PutItem and writing its own logs. The log group retains
+allows DynamoDB Query/PutItem, reading inspection images under `images/`,
+and writing its own logs. The log group retains
 14 days. No public function URL or HTTP gateway is provisioned.
 
 The GitHub role can publish images and update only this API function. Its OIDC
@@ -159,7 +91,7 @@ The configured keys and billing mode match the existing table. The plan should i
 AWS_PROFILE=379810014574_TerraformAccess terraform apply reports.tfplan
 ```
 
-The Lambda uses `REPORTS_TABLE`, `REPORT_PARTITION_KEY`, and `REPORT_SORT_KEY` from `main.tf`. Include `zipcode` in each uploaded image's S3 user metadata as a five-digit ZIP or ZIP+4 string (for example, `00901`). Missing or invalid ZIP codes fail processing rather than writing to an invented location.
+The Lambda uses `REPORTS_TABLE`, `REPORT_PARTITION_KEY`, and `REPORT_SORT_KEY` from `analyzer.tf`. Include `zipcode` in each uploaded image's S3 user metadata as a five-digit ZIP or ZIP+4 string (for example, `00901`). Missing or invalid ZIP codes fail processing rather than writing to an invented location.
 
 Reports use `<classification>-<timestamp>` for the sort key, with `HEALTHY`, `MAINTENANCE`, or `DAMAGES` and a UTC timestamp with six fractional digits. Unassessable images retain a null classification and use the `UNASSESSED-` key prefix. The timestamp comes from capture metadata when supplied, otherwise the S3 event time (or object last-modified time). Two different images with the same ZIP, classification, and timestamp produce a collision error rather than overwrite a report; supply distinct capture timestamps for distinct observations.
 

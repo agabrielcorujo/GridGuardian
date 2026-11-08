@@ -1,0 +1,121 @@
+name: Publish and deploy GridGuardian API
+
+on:
+  push:
+    branches: [main, api]
+    paths:
+      - 'src/GridGuardianAPI/**'
+      - 'docker/GridGuardian.Dockerfile'
+      - '.github/workflows/gridguardian-api-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gridguardian-api-release
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: gridguardian-dev-image-analyzer
+  LAMBDA_FUNCTION_NAME: GridGuardianAPI
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials using GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::379810014574:role/gridguardian-dev-github-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: '379810014574'
+          role-session-name: gridguardian-api-${{ github.run_id }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set unique image tag
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          echo "uri=${REGISTRY}/${ECR_REPOSITORY}:api-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Lambda image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/GridGuardianAPI
+          file: ./docker/GridGuardian.Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.image.outputs.uri }}
+          cache-from: type=gha,scope=gridguardian-api
+          cache-to: type=gha,mode=max,scope=gridguardian-api
+
+      - name: Record image for Lambda setup
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          {
+            echo '### GridGuardian API image published'
+            echo
+            echo "Tagged image: \`${IMAGE_URI}\`"
+            echo
+            echo "Lambda image URI: \`${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}\`"
+            echo
+            echo 'Use this digest for Terraform api_image_digest on initial creation.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check whether Terraform has created the API
+        id: lambda
+        run: |
+          if aws lambda get-function --function-name "$LAMBDA_FUNCTION_NAME" > /dev/null 2> lambda-error.txt; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          elif grep -q 'ResourceNotFoundException' lambda-error.txt; then
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+            echo 'Image published. Run Terraform apply to create GridGuardianAPI before the next release.' >> "$GITHUB_STEP_SUMMARY"
+          elif grep -q 'AccessDeniedException' lambda-error.txt && grep -q 'lambda:GetFunction' lambda-error.txt; then
+            echo '::error::Image published, but Lambda deployment permissions are missing. Run Terraform apply to grant the GitHub deployment role access, then rerun this workflow.'
+            cat lambda-error.txt >&2
+            exit 1
+          else
+            cat lambda-error.txt >&2
+            exit 1
+          fi
+
+      - name: Deploy published image to Lambda
+        if: steps.lambda.outputs.exists == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          aws lambda wait function-updated-v2 --function-name "$LAMBDA_FUNCTION_NAME"
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --image-uri "${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}" > /dev/null
+          aws lambda wait function-updated-v2 --function-name "$LAMBDA_FUNCTION_NAME"
+          DEPLOYED_IMAGE=$(aws lambda get-function \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --query 'Code.ResolvedImageUri' --output text)
+          if [ "$DEPLOYED_IMAGE" != "${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}" ]; then
+            echo "::error::Lambda image mismatch: expected ${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}, got ${DEPLOYED_IMAGE}"
+            exit 1
+          fi
+          echo "Deployed ${LAMBDA_FUNCTION_NAME}: ${DEPLOYED_IMAGE}" >> "$GITHUB_STEP_SUMMARY"
