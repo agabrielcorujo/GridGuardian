@@ -14,8 +14,8 @@ output "image_upload_prefix" {
 }
 
 output "reports_table_name" {
-  description = "Existing DynamoDB reports table; partition key is report_id (String)."
-  value       = data.aws_dynamodb_table.reports.name
+  description = "Managed DynamoDB reports table; keys are zipcode (String) and condition-timestamp (String)."
+  value       = aws_dynamodb_table.reports.name
 }
 
 output "ecr_repository_url" {

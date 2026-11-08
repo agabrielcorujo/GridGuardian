@@ -12,19 +12,30 @@ locals {
   foundation_models = "arn:${local.partition}:bedrock:us-*::foundation-model/${local.foundation_model}"
 }
 
-# Existing storage is referenced, not created or imported into management.
+# The existing image bucket remains outside Terraform management.
 data "aws_s3_bucket" "images" {
   bucket = var.images_bucket_name
 }
 
-data "aws_dynamodb_table" "reports" {
-  name = var.reports_table_name
+import {
+  to = aws_dynamodb_table.reports
+  id = var.reports_table_name
+}
 
-  lifecycle {
-    postcondition {
-      condition     = self.hash_key == "report_id" && (self.range_key == null || self.range_key == "")
-      error_message = "The existing reports table must have report_id as its partition key and no sort key."
-    }
+resource "aws_dynamodb_table" "reports" {
+  name         = var.reports_table_name
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "zipcode"
+  range_key    = "condition-timestamp"
+
+  attribute {
+    name = "zipcode"
+    type = "S"
+  }
+
+  attribute {
+    name = "condition-timestamp"
+    type = "S"
   }
 }
 
@@ -91,7 +102,7 @@ resource "aws_iam_role_policy" "analyzer" {
         Sid      = "ReadAndWriteReports"
         Effect   = "Allow"
         Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
-        Resource = data.aws_dynamodb_table.reports.arn
+        Resource = aws_dynamodb_table.reports.arn
       },
       {
         Sid      = "InvokeNovaInferenceProfile"
@@ -138,11 +149,12 @@ resource "aws_lambda_function" "analyzer" {
 
   environment {
     variables = {
-      IMAGES_BUCKET    = data.aws_s3_bucket.images.id
-      IMAGE_PREFIX     = var.image_prefix
-      REPORTS_TABLE    = data.aws_dynamodb_table.reports.name
-      REPORT_ID_KEY    = data.aws_dynamodb_table.reports.hash_key
-      BEDROCK_MODEL_ID = var.bedrock_model_id
+      IMAGES_BUCKET        = data.aws_s3_bucket.images.id
+      IMAGE_PREFIX         = var.image_prefix
+      REPORTS_TABLE        = aws_dynamodb_table.reports.name
+      REPORT_PARTITION_KEY = aws_dynamodb_table.reports.hash_key
+      REPORT_SORT_KEY      = aws_dynamodb_table.reports.range_key
+      BEDROCK_MODEL_ID     = var.bedrock_model_id
     }
   }
 

@@ -66,7 +66,7 @@ variable "images_bucket_name" {
 }
 
 variable "reports_table_name" {
-  description = "Existing DynamoDB table with report_id (String) as its partition key and no sort key."
+  description = "Existing DynamoDB table to import and manage; keys are zipcode (String) and condition-timestamp (String)."
   type        = string
   default     = "GridGuardian"
 }
