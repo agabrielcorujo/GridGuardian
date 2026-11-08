@@ -1,0 +1,3 @@
+# Replace with the digest of your first api-* image in ECR.
+# Copy this file to terraform.tfvars after the publishing workflow succeeds.
+api_image_digest = "sha256:REPLACE_WITH_64_HEX_CHARACTERS_FROM_THE_API_IMAGE"
