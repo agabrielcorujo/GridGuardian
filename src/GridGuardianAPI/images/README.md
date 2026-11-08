@@ -1,4 +1,6 @@
-# Pole image uploads
+# Demo photo batch uploads
+
+[Project overview](../../../README.md) · [API](../README.md)
 
 Place your `.jpeg` or `.webp` pole photos here (each at most 3.75 MiB;
 at most 8000 pixels per dimension for Bedrock). The whole directory is
@@ -10,8 +12,8 @@ must be renamed to `.jpeg` before running the uploader.
 From `src/GridGuardianAPI`, using an environment with the API's `boto3` dependency:
 
 ```sh
-python images/upload_images.py --dry-run
-python images/upload_images.py --profile YOUR_AWS_PROFILE
+uv run python images/upload_images.py --dry-run
+uv run python images/upload_images.py --profile YOUR_AWS_PROFILE
 ```
 
 The default makes **100 total uploads**, numbered 0–99, cycling through the
@@ -21,7 +23,7 @@ count as needed. Each invocation uses a unique batch folder:
 Credentials come from the selected profile or the normal AWS credential chain.
 The uploader needs `s3:PutObject` on that prefix. Dry runs need no AWS credentials.
 
-Metadata includes `record-id`, the analyzer's actual identity field `report-id`,
+Metadata includes uploader-generated `record-id` and `report-id` labels,
 `zipcode`, `latitude`, `longitude`, a timezone-aware unique `timestamp`,
 `pole-id`, and `flight-id`. Locations cycle through sample Puerto Rico locations
 in San Juan, Ponce, Mayaguez, Arecibo, and Caguas. Each upload receives a random
@@ -30,7 +32,12 @@ within a batch. Edit `LOCATIONS` in the script to change the ranges. These are
 approximate test areas, not official ZIP boundaries. These coordinates and timestamps
 are **synthetic test observations**, not actual photo capture data.
 
-The contract was checked against `lambda/handler.py` on `origin/aws-infra`;
-the bucket and prefix also match this branch's Terraform outputs and analyzer
-IAM policy. Uploads trigger the existing S3 analysis pipeline. The script uploads
+The metadata contract matches [`lambda/handler.py`](../../../lambda/handler.py)
+on `main`; the analyzer derives its retry identity from the S3 object. The bucket
+and prefix match the default Terraform configuration and analyzer IAM policy. Uploads trigger the existing S3 analysis pipeline. The script uploads
 only; successful upload does not confirm that asynchronous analysis completed.
+
+For individual JPEG, PNG, or WebP uploads with actual observation metadata, use
+[`scripts/upload_image.py`](../../../scripts/upload_image.py) as described in the
+[root README](../../../README.md). The `.jpeg`/`.webp` restriction above applies
+to this batch script, not the analyzer or single-image uploader.

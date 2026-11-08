@@ -1,8 +1,9 @@
 # GridGuardian infrastructure
 
 `main` is the shared branch for all Terraform changes, including the
-analyzer and API. Both Adrian and Pablo must pull main before planning
-or applying. Do not apply the older Terraform configuration from `api`.
+analyzer and API. Pull `main` before planning or applying. Do not apply the older Terraform configuration from `api`.
+
+[Project overview](../README.md) · [API](../src/GridGuardianAPI/README.md)
 
 ## Synchronize an existing checkout
 
@@ -64,7 +65,9 @@ the analyzer and API Lambda functions to retrieve images. Keep both permissions
 in Terraform: older configurations reverted them and broke Actions deployments.
 
 API pushes on `api` or `main` publish a unique immutable image tag and deploy
-by digest. Infrastructure work on `aws-infra` does not deploy API source.
+by digest. Infrastructure-only changes do not deploy API source. The analyzer publishing
+workflow runs for `lambda/` changes on `main` or `aws-infra`; it publishes an
+image but does not update the worker until its `image_tag` is applied in Terraform.
 
 ## Reports table
 
@@ -79,7 +82,7 @@ Writers must build `condition-timestamp` as `<condition>-<timestamp>`. Use a con
 
 Query a ZIP code and condition using `#zip = :zip AND begins_with(#sk, :condition)`, with attribute names `{"#zip": "zipcode", "#sk": "condition-timestamp"}` and values such as `:zip = "02108"`, `:condition = "HEALTHY-"`. The trailing separator avoids matching other condition names with the same prefix.
 
-The import block adopts the existing table without recreating it. The verified table is in account `379810014574`, region `us-east-1`. Preview the import and table changes with:
+The import block adopts the existing table without recreating it. The default table is in account `379810014574`, region `us-east-1`. Preview the import and table changes with:
 
 ```sh
 AWS_PROFILE=379810014574_TerraformAccess terraform plan -out=reports.tfplan -target=aws_dynamodb_table.reports

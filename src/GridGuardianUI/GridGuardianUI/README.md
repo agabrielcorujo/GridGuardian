@@ -3,7 +3,11 @@
 React + TypeScript + Vite dashboard for visual inspections of Puerto Rico's
 electrical infrastructure. Uses live API data, Leaflet maps, and no authentication.
 
+[Project overview](../../../README.md) · [API](../../GridGuardianAPI/README.md)
+
 ## Run locally
+
+Use Node.js 22.x. Run these commands from this directory:
 
 ```sh
 npm ci
@@ -12,9 +16,9 @@ npm run dev
 ```
 
 Open the Local URL printed by Vite (normally http://localhost:5173).
-`.env.local` is already configured in this working checkout. The tracked
-`.env.example` documents `VITE_API_BASE_URL`; replace it in `.env.local` to
-change backends, then restart Vite. This is a public browser configuration
+The tracked `.env.example` documents `VITE_API_BASE_URL`. Set it in `.env.local`
+to `http://localhost:8000` for a local API, or your deployed API base URL, then
+restart Vite. This is a public browser configuration
 value, not a place for credentials. Production builds read the variable at
 build time.
 
@@ -40,8 +44,7 @@ npm run preview
 
 The dashboard calls `GET /analytics/{zipcode}`, `/map/{zipcode}`, and
 `/reports/{zipcode}` directly. The API must allow CORS from the local origin.
-Requests are canceled when filters change. Map tiles use Esri’s public light-gray and imagery raster services, verified
-without API keys. Both require network access and retain source attribution. Counts are
+Requests are canceled when filters change. Map tiles use Esri’s public light-gray and imagery raster services without API keys. Both require network access and retain source attribution. Counts are
 image observations, not unique pole inventory. The API currently scopes data
 by ZIP, so an island-wide aggregate cannot be requested from this UI.
 
@@ -53,9 +56,10 @@ Closing or changing observations cancels the in-flight URL request. The API
 image endpoint and its S3 read policy must be deployed first. S3 stays private;
 AWS credentials are never sent to the browser.
 
-Environment files, node_modules, builds, logs, TypeScript caches, and browser
+Local environment files, node_modules, builds, logs, TypeScript caches, and browser
 verification artifacts are gitignored. Commit package-lock.json for repeatable
-installs. No deployment or publishing is performed by this project setup.
+installs. `npm run build` produces local output; Vercel publishes it when the
+GitHub integration is configured.
 
 
 ## Vercel deployment

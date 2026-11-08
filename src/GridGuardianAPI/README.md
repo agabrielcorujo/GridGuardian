@@ -1,8 +1,23 @@
 # GridGuardian API
 
 FastAPI runs in AWS Lambda through `main.handler` (Mangum). Python 3.11
-matches `.python-version`. Lambda supplies AWS credentials and the region;
+is selected by `.python-version`. Lambda supplies AWS credentials and the region;
 `TABLE_NAME` defaults to `GridGuardian`.
+
+[Project overview](../../README.md) · [Dashboard](../GridGuardianUI/GridGuardianUI/README.md)
+
+## Run locally
+
+From this directory:
+
+```sh
+uv sync --python 3.11
+AWS_PROFILE=YOUR_AWS_PROFILE AWS_DEFAULT_REGION=us-east-1 \
+  uv run uvicorn main:app --reload --port 8000
+```
+
+Open `http://localhost:8000/docs`. Data requests require AWS access to the
+reports table; `/health` does not. Set `TABLE_NAME` to override the table.
 
 ## Build locally
 
@@ -82,8 +97,9 @@ Only condition-prefixed observation records are returned; `REPORT-` processing
 control records are excluded. The sort-key timestamp is used when capture
 metadata has no timestamp. Malformed timestamps are excluded. Null, missing,
 or invalid GPS values are counted as missing and omitted from the map; ZIP
-centers are never substituted. No image download URL is invented: the current
-worker records assessment metadata, not an S3 object reference.
+centers are never substituted. The analyzer stores the source S3 bucket, key,
+and object version when available; the image endpoint uses these references
+to issue short-lived signed links.
 
 Metrics count **image observations**, not unique poles or a complete inventory.
 `attention_required` counts MAINTENANCE + DAMAGES; `healthy_percentage` uses
