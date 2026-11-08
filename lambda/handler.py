@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -56,6 +57,9 @@ def utc_now():
 def observation_metadata(raw):
     """Normalize uploader-supplied metadata, preserving missing capture values."""
     metadata = {key.lower().replace("-", "_"): value for key, value in raw.items()}
+    zipcode = metadata.get("zipcode", "").strip()
+    if not re.fullmatch(r"[0-9]{5}(?:-[0-9]{4})?", zipcode):
+        raise ValueError("Image metadata must include zipcode as a five-digit ZIP or ZIP+4")
     timestamp = metadata.get("timestamp")
     if timestamp:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -75,6 +79,7 @@ def observation_metadata(raw):
             raise ValueError("GPS coordinates are out of range")
         location = {"latitude": lat, "longitude": lon}
     return {
+        "zipcode": zipcode,
         "timestamp": timestamp,
         "location": location,
         "pole_id": metadata.get("pole_id"),
@@ -88,7 +93,7 @@ def fetch_image(s3, record):
     key = unquote_plus(obj["key"])
     if bucket != os.environ["IMAGES_BUCKET"] or not key.startswith(os.environ.get("IMAGE_PREFIX", "images/")):
         raise ValueError("Unexpected image bucket or prefix")
-    if Path(key).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+    if Path(key).suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
         return None
     args = {"Bucket": bucket, "Key": key}
     version = obj.get("versionId")
@@ -111,8 +116,10 @@ def fetch_image(s3, record):
         image_format = "jpeg"
     elif image.startswith(b"\x89PNG\r\n\x1a\n"):
         image_format = "png"
+    elif image.startswith(b"RIFF") and image[8:12] == b"WEBP":
+        image_format = "webp"
     else:
-        raise ValueError("Object must contain JPEG or PNG image bytes")
+        raise ValueError("Object must contain JPEG, PNG, or WebP image bytes")
     raw = response.get("Metadata", {})
     identity = json.dumps([bucket, key, version, obj.get("eTag"), obj.get("sequencer")], separators=(",", ":"))
     source_id = hashlib.sha256(identity.encode()).hexdigest()
@@ -123,9 +130,26 @@ def fetch_image(s3, record):
     metadata.update({
         "image_s3_bucket": bucket, "image_s3_key": key,
         "image_version_id": version, "image_etag": obj.get("eTag"),
-        "upload_event_time": record.get("eventTime"),
+        "upload_event_time": record.get("eventTime") or response["LastModified"].isoformat(),
     })
     return image, image_format, report_id, source_id, metadata
+
+
+def report_keys(metadata, source_id, classification=None):
+    """Keep retry ownership independent of the model's classification."""
+    partition_key = os.environ.get("REPORT_PARTITION_KEY", "zipcode")
+    sort_key = os.environ.get("REPORT_SORT_KEY", "condition-timestamp")
+    claim_key = {partition_key: metadata["zipcode"], sort_key: f"REPORT-{source_id}"}
+    timestamp = metadata["timestamp"] or metadata["upload_event_time"]
+    parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Report timestamp must include a timezone")
+    timestamp = parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    report_key = {
+        partition_key: metadata["zipcode"],
+        sort_key: f"{classification or 'UNASSESSED'}-{timestamp}",
+    }
+    return claim_key, report_key
 
 
 def validate_analysis(analysis):
@@ -197,19 +221,37 @@ def claim_report(table, key, source_id, owner, lease_seconds):
         raise RuntimeError("Report ID belongs to another image or processing is already in progress") from exc
 
 
-def save_report(table, key, owner, metadata, analysis):
-    fields = {**metadata, **analysis, "status": "COMPLETED", "analyzed_at": utc_now()}
-    names = {f"#f{i}": field for i, field in enumerate(fields)}
-    values = {f":v{i}": value for i, value in enumerate(fields.values())}
-    values[":owner"] = owner
-    table.update_item(
-        Key=key,
-        UpdateExpression="SET " + ", ".join(f"#f{i} = :v{i}" for i in range(len(fields))) +
-                         " REMOVE processing_owner, lease_until, processing_error",
-        ConditionExpression="processing_owner = :owner",
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-    )
+def save_report(table, key, owner, report_id, source_id, metadata, analysis):
+    _, report_key = report_keys(metadata, source_id, analysis["classification"])
+    fields = {
+        **metadata, **analysis, **report_key, "report_id": report_id,
+        "source_id": source_id, "status": "COMPLETED", "analyzed_at": utc_now(),
+    }
+    # Publish the report and complete the stable retry record atomically.
+    table.meta.client.transact_write_items(TransactItems=[
+        {"Put": {
+            "TableName": table.name,
+            "Item": fields,
+            "ConditionExpression": "attribute_not_exists(#pk) OR source_id = :source",
+            "ExpressionAttributeNames": {"#pk": os.environ.get("REPORT_PARTITION_KEY", "zipcode")},
+            "ExpressionAttributeValues": {":source": source_id},
+        }},
+        {"Update": {
+            "TableName": table.name,
+            "Key": key,
+            "UpdateExpression": (
+                "SET #status = :completed, report_id = :report, report_sort_key = :sort "
+                "REMOVE processing_owner, lease_until, processing_error"
+            ),
+            "ConditionExpression": "processing_owner = :owner",
+            "ExpressionAttributeNames": {"#status": "status"},
+            "ExpressionAttributeValues": {
+                ":completed": "COMPLETED", ":report": report_id,
+                ":sort": report_key[os.environ.get("REPORT_SORT_KEY", "condition-timestamp")],
+                ":owner": owner,
+            },
+        }},
+    ])
 
 
 def release_failed_report(table, key, owner, exc):
@@ -241,7 +283,7 @@ def lambda_handler(event, context):
                 results.append({"status": "SKIPPED"})
                 continue
             image, image_format, report_id, source_id, metadata = fetched
-            key = {os.environ.get("REPORT_ID_KEY", "report_id"): report_id}
+            key, _ = report_keys(metadata, source_id)
             owner = str(uuid.uuid4())
             remaining = context.get_remaining_time_in_millis() / 1000 if context else 180
             if remaining < 120:
@@ -251,7 +293,7 @@ def lambda_handler(event, context):
                 continue
             try:
                 analysis = analyze_image(bedrock, image, image_format, report_id, metadata)
-                save_report(table, key, owner, metadata, analysis)
+                save_report(table, key, owner, report_id, source_id, metadata, analysis)
             except Exception as exc:
                 try:
                     release_failed_report(table, key, owner, exc)

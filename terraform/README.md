@@ -23,4 +23,8 @@ The configured keys and billing mode match the existing table. The plan should i
 AWS_PROFILE=379810014574_TerraformAccess terraform apply reports.tfplan
 ```
 
-The Lambda receives `REPORT_PARTITION_KEY` and `REPORT_SORT_KEY`. The current worker in `../lambda/handler.py` still writes a single `report_id` key and must be updated before deploying it against this schema. It must supply ZIP codes, construct the combined sort key, and move items when their condition changes (primary key attributes cannot be updated in place).
+The Lambda uses `REPORTS_TABLE`, `REPORT_PARTITION_KEY`, and `REPORT_SORT_KEY` from `main.tf`. Include `zipcode` in each uploaded image's S3 user metadata as a five-digit ZIP or ZIP+4 string (for example, `00901`). Missing or invalid ZIP codes fail processing rather than writing to an invented location.
+
+Reports use `<classification>-<timestamp>` for the sort key, with `HEALTHY`, `MAINTENANCE`, or `DAMAGES` and a UTC timestamp with six fractional digits. Unassessable images retain a null classification and use the `UNASSESSED-` key prefix. The timestamp comes from capture metadata when supplied, otherwise the S3 event time (or object last-modified time). Two different images with the same ZIP, classification, and timestamp produce a collision error rather than overwrite a report; supply distinct capture timestamps for distinct observations.
+
+The worker also stores a `REPORT-<source_id>` control item in the same ZIP partition to prevent duplicate analysis on retries. It atomically writes the classified report and completes this control item. Condition-prefixed queries return reports; ZIP-only queries also include control items. The report retains `report_id` as a non-key attribute. Reclassifying existing reports requires moving them to the new condition key; this upload worker does not reclassify completed reports.
