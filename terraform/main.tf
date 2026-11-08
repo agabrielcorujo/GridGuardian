@@ -67,6 +67,11 @@ resource "aws_ecr_repository_policy" "analyzer" {
   })
 }
 
+resource "aws_cloudwatch_log_group" "analyzer" {
+  name              = "/aws/lambda/${local.function_name}"
+  retention_in_days = 14
+}
+
 # Captures exhausted asynchronous invocations; this is not an input queue.
 resource "aws_sqs_queue" "analysis_failures" {
   name                      = "${local.name}-analysis-failures"
@@ -120,6 +125,12 @@ resource "aws_iam_role_policy" "analyzer" {
         }
       },
       {
+        Sid      = "WriteWorkerLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.analyzer.arn}:*"
+      },
+      {
         Sid      = "CaptureFailedAnalysis"
         Effect   = "Allow"
         Action   = "sqs:SendMessage"
@@ -146,6 +157,11 @@ resource "aws_lambda_function" "analyzer" {
   architectures = ["x86_64"]
   timeout       = var.lambda_timeout
   memory_size   = var.lambda_memory_size
+
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.analyzer.name
+  }
 
   environment {
     variables = {

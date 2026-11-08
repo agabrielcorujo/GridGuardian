@@ -28,6 +28,11 @@ output "lambda_function_name" {
   value       = try(aws_lambda_function.analyzer[0].function_name, null)
 }
 
+output "analysis_log_group" {
+  description = "CloudWatch log group for Lambda execution and processing-stage logs."
+  value       = aws_cloudwatch_log_group.analyzer.name
+}
+
 output "analysis_failure_queue_url" {
   description = "Failed invocation records for investigation and manual replay."
   value       = aws_sqs_queue.analysis_failures.url

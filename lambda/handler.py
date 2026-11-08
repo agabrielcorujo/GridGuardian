@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -15,6 +16,9 @@ from urllib.parse import unquote_plus
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 MAX_IMAGE_BYTES = 3_932_160
 SEVERITIES = {
@@ -268,43 +272,65 @@ def release_failed_report(table, key, owner, exc):
 
 def lambda_handler(event, context):
     if event.get("Event") == "s3:TestEvent":
+        logger.info("Received S3 notification test event")
         return {"reports": []}
     records = event.get("Records")
     if not isinstance(records, list) or not records:
         raise ValueError("Expected an S3 event with Records")
-    s3, bedrock, table = services()
+    logger.info("Processing upload event records=%d request_id=%s", len(records), getattr(context, "aws_request_id", None))
+    try:
+        s3, bedrock, table = services()
+    except Exception:
+        logger.exception("Failed to initialize AWS clients or reports table")
+        raise
     results, failures = [], []
     for record in records:
+        stage = "validate_event"
+        report_id = None
         try:
             if record.get("eventSource") != "aws:s3" or not record.get("eventName", "").startswith("ObjectCreated:"):
                 raise ValueError("Expected an S3 ObjectCreated event")
+            stage = "fetch_image"
+            s3_record = record.get("s3", {})
+            logger.info("Fetching S3 image bucket=%s key=%s", s3_record.get("bucket", {}).get("name"), s3_record.get("object", {}).get("key"))
             fetched = fetch_image(s3, record)
             if fetched is None:
+                logger.info("Skipped unsupported file extension")
                 results.append({"status": "SKIPPED"})
                 continue
             image, image_format, report_id, source_id, metadata = fetched
+            logger.info("Fetched image report_id=%s format=%s bytes=%d", report_id, image_format, len(image))
+            stage = "claim_report"
             key, _ = report_keys(metadata, source_id)
             owner = str(uuid.uuid4())
             remaining = context.get_remaining_time_in_millis() / 1000 if context else 180
             if remaining < 120:
                 raise RuntimeError("Insufficient time remaining; retry this upload")
             if not claim_report(table, key, source_id, owner, int(remaining) + 30):
+                logger.info("Skipped completed report report_id=%s", report_id)
                 results.append({"report_id": report_id, "status": "ALREADY_COMPLETED"})
                 continue
             try:
+                stage = "analyze_image"
+                logger.info("Calling Bedrock report_id=%s model=%s", report_id, os.environ.get("BEDROCK_MODEL_ID"))
                 analysis = analyze_image(bedrock, image, image_format, report_id, metadata)
+                logger.info("Validated analysis report_id=%s classification=%s", report_id, analysis["classification"])
+                stage = "save_report"
                 save_report(table, key, owner, report_id, source_id, metadata, analysis)
             except Exception as exc:
                 try:
                     release_failed_report(table, key, owner, exc)
                 except Exception:
                     # Preserve the original error. A stale claim is recoverable after its lease expires.
-                    pass
+                    logger.exception("Failed to release processing claim report_id=%s", report_id)
                 raise
+            logger.info("Saved completed report report_id=%s", report_id)
             results.append({"report_id": report_id, "status": "COMPLETED"})
         except Exception as exc:
+            logger.exception("Image processing failed stage=%s report_id=%s", stage, report_id)
             failures.append(f"{type(exc).__name__}: {exc}"[:1000])
     if failures:
         # S3 invokes asynchronously: raising retries the event, not an HTTP response.
         raise RuntimeError(f"{len(failures)} image(s) failed: {', '.join(failures)}")
+    logger.info("Upload event completed records=%d", len(results))
     return {"reports": results}
