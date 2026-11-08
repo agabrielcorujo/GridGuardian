@@ -11,8 +11,9 @@ files. Commit `.terraform.lock.hcl` and the `.tf` source files.
 
 1. Commit and push the API source, requirements, Dockerfile, and GitHub workflow
    on `api` or `main`. The workflow publishes an `api-*` image to the shared ECR
-   repository. Until Terraform grants deployment access and creates the function,
-   the workflow records that setup is pending and leaves the published image ready.
+   repository. If the function does not exist, the workflow records that setup is
+   pending and leaves the published image ready. If deployment permissions are
+   missing, the workflow fails after publishing; apply Terraform and rerun it.
 2. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace its placeholder
    with the API image digest from the Actions summary (`sha256:...`, without the
    repository prefix). Use the API image, not an analyzer image.

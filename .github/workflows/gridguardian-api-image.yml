@@ -92,8 +92,9 @@ jobs:
             echo 'exists=false' >> "$GITHUB_OUTPUT"
             echo 'Image published. Run Terraform apply to create GridGuardianAPI before the next release.' >> "$GITHUB_STEP_SUMMARY"
           elif grep -q 'AccessDeniedException' lambda-error.txt && grep -q 'lambda:GetFunction' lambda-error.txt; then
-            echo 'exists=false' >> "$GITHUB_OUTPUT"
-            echo 'Image published. Terraform deployment permissions are not available yet; run Terraform apply.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::error::Image published, but Lambda deployment permissions are missing. Run Terraform apply to grant the GitHub deployment role access, then rerun this workflow.'
+            cat lambda-error.txt >&2
+            exit 1
           else
             cat lambda-error.txt >&2
             exit 1
@@ -113,5 +114,8 @@ jobs:
           DEPLOYED_IMAGE=$(aws lambda get-function \
             --function-name "$LAMBDA_FUNCTION_NAME" \
             --query 'Code.ResolvedImageUri' --output text)
-          test "$DEPLOYED_IMAGE" = "${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          if [ "$DEPLOYED_IMAGE" != "${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}" ]; then
+            echo "::error::Lambda image mismatch: expected ${REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}, got ${DEPLOYED_IMAGE}"
+            exit 1
+          fi
           echo "Deployed ${LAMBDA_FUNCTION_NAME}: ${DEPLOYED_IMAGE}" >> "$GITHUB_STEP_SUMMARY"
