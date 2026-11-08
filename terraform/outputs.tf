@@ -37,3 +37,11 @@ output "analysis_failure_queue_url" {
   description = "Failed invocation records for investigation and manual replay."
   value       = aws_sqs_queue.analysis_failures.url
 }
+
+output "api_function_name" {
+  value = aws_lambda_function.api.function_name
+}
+
+output "api_function_arn" {
+  value = aws_lambda_function.api.arn
+}

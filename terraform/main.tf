@@ -60,7 +60,10 @@ resource "aws_ecr_repository_policy" "analyzer" {
       Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
       Condition = {
         ArnLike = {
-          "aws:SourceArn" = "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.function_name}"
+          "aws:SourceArn" = [
+            "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${local.function_name}",
+            "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:GridGuardianAPI",
+          ]
         }
       }
     }]

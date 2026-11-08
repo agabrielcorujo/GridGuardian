@@ -6,7 +6,7 @@ github_repository       = "agabrielcorujo/GridGuardian"
 # IDs from GitHub's repository API; required by this repository's OIDC subject.
 github_owner_id         = "148304752"
 github_repository_id    = "1449534292"
-github_publish_branches = ["main", "aws-infra"]
+github_publish_branches = ["main", "aws-infra", "api"]
 # If GitHub's OIDC provider already exists in the account, use its ARN instead.
 github_oidc_provider_arn = null
 
@@ -21,3 +21,6 @@ image_prefix       = "images/"
 bedrock_model_id    = "us.amazon.nova-2-lite-v1:0"
 lambda_timeout     = 180
 lambda_memory_size = 512
+
+# Initial API digest; keep available after Actions takes over API releases.
+api_image_digest = "sha256:REPLACE_WITH_64_HEX_CHARACTERS_FROM_THE_API_IMAGE"

@@ -24,9 +24,10 @@ resource "aws_iam_role" "github_ecr_push" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = [
-            for branch in var.github_publish_branches : "${local.github_oidc_subject_prefix}:ref:refs/heads/${branch}"
-          ]
+          "token.actions.githubusercontent.com:sub" = concat(
+            [for branch in var.github_publish_branches : "${local.github_oidc_subject_prefix}:ref:refs/heads/${branch}"],
+            [for branch in var.github_publish_branches : "repo:${var.github_repository}:ref:refs/heads/${branch}" if branch == "api"],
+          )
         }
       }
     }]

@@ -34,7 +34,12 @@ variable "github_repository_id" {
 variable "github_publish_branches" {
   description = "Branches trusted to assume the ECR publishing role. Keep aligned with workflow triggers and job condition."
   type        = list(string)
-  default     = ["main", "aws-infra"]
+  default     = ["main", "aws-infra", "api"]
+
+  validation {
+    condition     = alltrue([for branch in ["main", "aws-infra", "api"] : contains(var.github_publish_branches, branch)])
+    error_message = "Keep main, aws-infra, and api trusted. Update github_publish_branches in your local tfvars to include all three."
+  }
 
   validation {
     condition     = length(var.github_publish_branches) > 0 && alltrue([for branch in var.github_publish_branches : length(trimspace(branch)) > 0])

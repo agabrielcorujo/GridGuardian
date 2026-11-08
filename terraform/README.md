@@ -1,4 +1,71 @@
-# Reports table
+# GridGuardian infrastructure
+
+`aws-infra` is the shared branch for all Terraform changes, including the
+analyzer and API. Both Adrian and Pablo must pull this branch before planning
+or applying. Do not apply the older Terraform configuration from `api`.
+
+## Synchronize an existing checkout
+
+```sh
+git switch aws-infra
+git pull --ff-only origin aws-infra
+cd terraform
+export AWS_PROFILE=379810014574_TerraformAccess
+terraform init
+```
+
+Keep your existing state and local `terraform.tfvars`; never commit them. Update
+any existing `github_publish_branches` override to include `main`, `aws-infra`,
+and `api`. Updating the variable default does not override a local tfvars value.
+Keep the existing analyzer `image_tag` set: clearing it disables the worker and
+plans to remove its function and S3 integration.
+
+Set `api_image_digest` to the API digest from the Actions summary, or read the
+currently deployed API image with:
+
+```sh
+aws lambda get-function --function-name GridGuardianAPI --region us-east-1 \
+  --query 'Code.ResolvedImageUri' --output text
+```
+
+Use only the `sha256:...` suffix as `api_image_digest`. The existing API resources
+are adopted by `api-imports.tf` when missing from the selected state. The import
+blocks preserve their resource addresses and do not recreate the API. Terraform
+ignores subsequent API image changes; GitHub Actions owns API image releases.
+
+```sh
+terraform plan -out=infra.tfplan
+terraform show infra.tfplan
+terraform apply infra.tfplan
+```
+
+Review the saved plan before applying: both functions must retain ECR retrieval
+access, and GitHub trust must retain all three branches. Expect API imports where
+needed, not API replacement. Investigate any resource destruction or replacement.
+
+Git synchronizes configuration, not Terraform state. This checkout currently has
+no shared remote backend. Agree on one authoritative state and serialize applies;
+independent local state files can still disagree even on the same Git branch.
+After adopting the API into the authoritative state, retire the old API checkout
+from infrastructure applies. Do not apply from both states.
+
+## API configuration
+
+`GridGuardianAPI` uses the existing ECR repository, Python `main.handler`,
+`x86_64`, 256 MB, a 15-second timeout, and `TABLE_NAME=GridGuardian`. Its role
+allows DynamoDB Query/PutItem and writing its own logs. The log group retains
+14 days. No public function URL or HTTP gateway is provisioned.
+
+The GitHub role can publish images and update only this API function. Its OIDC
+trust includes `main`, `aws-infra`, and `api`, with the repository ID subjects
+and the existing legacy `api` subject. The ECR repository policy permits both
+the analyzer and API Lambda functions to retrieve images. Keep both permissions
+in Terraform: older configurations reverted them and broke Actions deployments.
+
+API pushes on `api` or `main` publish a unique immutable image tag and deploy
+by digest. Infrastructure work on `aws-infra` does not deploy API source.
+
+## Reports table
 
 Terraform manages the table named by `reports_table_name` with on-demand billing and this key schema:
 
