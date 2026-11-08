@@ -1,3 +1,36 @@
+variable "github_repository" {
+  description = "GitHub owner/repository allowed to publish worker images through OIDC."
+  type        = string
+  default     = "agabrielcorujo/GridGuardian"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "Use owner/repository without a URL prefix."
+  }
+}
+
+variable "github_publish_branches" {
+  description = "Branches trusted to assume the ECR publishing role. Keep aligned with workflow triggers and job condition."
+  type        = list(string)
+  default     = ["main", "aws-infra"]
+
+  validation {
+    condition     = length(var.github_publish_branches) > 0 && alltrue([for branch in var.github_publish_branches : length(trimspace(branch)) > 0])
+    error_message = "Supply at least one nonempty branch name."
+  }
+}
+
+variable "github_oidc_provider_arn" {
+  description = "Existing GitHub OIDC provider ARN, or null to create the account's provider."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.github_oidc_provider_arn == null ? true : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$", var.github_oidc_provider_arn))
+    error_message = "Supply the GitHub OIDC provider ARN or null."
+  }
+}
+
 variable "aws_region" {
   description = "AWS Region for the stack and Bedrock source endpoint."
   type        = string

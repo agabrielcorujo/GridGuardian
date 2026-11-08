@@ -1,0 +1,85 @@
+name: Publish Lambda image to ECR
+
+on:
+  push:
+    branches: [main, aws-infra]
+    paths:
+      - 'lambda/**'
+      - '.github/workflows/publish-lambda-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/aws-infra'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'gridguardian-dev-image-analyzer' }}
+      IMAGE_TAG: sha-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check AWS configuration
+        shell: bash
+        run: |
+          if [[ -z "$AWS_ROLE_ARN" ]]; then
+            echo '::error::Set the repository Actions variable AWS_ECR_PUSH_ROLE_ARN to the Terraform github_ecr_push_role_arn output.'
+            exit 1
+          fi
+
+      - name: Authenticate to AWS using OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-ecr-${{ github.run_id }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Lambda image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lambda/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      - name: Summarize published image
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo '### Lambda image published'
+            echo
+            echo "Image: \`${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}\`"
+            echo "Digest: \`${IMAGE_DIGEST}\`"
+            echo
+            echo 'To deploy this image with Terraform, set:'
+            echo '```hcl'
+            echo "image_tag = \"${IMAGE_TAG}\""
+            echo '```'
+            echo 'Then review and apply a new Terraform plan. This workflow only publishes to ECR.'
+          } >> "$GITHUB_STEP_SUMMARY"

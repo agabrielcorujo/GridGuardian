@@ -1,3 +1,8 @@
+output "github_ecr_push_role_arn" {
+  description = "Set the GitHub repository Actions variable AWS_ECR_PUSH_ROLE_ARN to this value."
+  value       = aws_iam_role.github_ecr_push.arn
+}
+
 output "images_bucket_name" {
   description = "Existing bucket for original inspection images."
   value       = data.aws_s3_bucket.images.id

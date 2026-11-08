@@ -2,6 +2,11 @@ aws_region   = "us-east-1"
 project_name = "gridguardian"
 environment  = "dev"
 
+github_repository       = "agabrielcorujo/GridGuardian"
+github_publish_branches = ["main", "aws-infra"]
+# If GitHub's OIDC provider already exists in the account, use its ARN instead.
+github_oidc_provider_arn = null
+
 images_bucket_name = "grid-guardian-images"
 reports_table_name = "GridGuardian"
 
