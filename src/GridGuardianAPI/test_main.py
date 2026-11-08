@@ -1,6 +1,6 @@
 import unittest
 from decimal import Decimal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 from botocore.exceptions import ClientError
@@ -73,6 +73,38 @@ class ApiTests(unittest.TestCase):
                 main.matching_reports("00901", main.filters(), table)
         self.assertEqual(raised.exception.status_code, 503)
         self.assertNotIn("private", raised.exception.detail)
+
+    def test_image_link_uses_report_reference_and_version(self):
+        table, s3 = Mock(), Mock()
+        table.query.return_value = {"Items": [report("HEALTHY", 1,
+            image_s3_bucket="grid-guardian-images", image_s3_key="images/photo.webp", image_version_id="v1")]}
+        s3.generate_presigned_url.return_value = "https://s3.example/signed"
+        with patch.dict("os.environ", {"IMAGE_BUCKET": "grid-guardian-images", "IMAGE_PREFIX": "images/"}):
+            result = main.report_image("00901", "HEALTHY-2026-11-01T12:00:00Z", table, s3)
+        self.assertEqual(result, {"url": "https://s3.example/signed", "expires_in": 300})
+        s3.head_object.assert_called_once_with(Bucket="grid-guardian-images", Key="images/photo.webp", VersionId="v1")
+        self.assertEqual(s3.generate_presigned_url.call_args.kwargs["ExpiresIn"], 300)
+
+    def test_image_rejects_missing_or_unapproved_references(self):
+        for item in (None, report("HEALTHY", 1), report("HEALTHY", 1,
+                     image_s3_bucket="other-bucket", image_s3_key="images/photo.webp")):
+            table, s3 = Mock(), Mock()
+            table.query.return_value = {"Items": [item] if item else []}
+            with self.assertRaises(HTTPException) as raised:
+                main.report_image("00901", "HEALTHY-time", table, s3)
+            self.assertEqual(raised.exception.status_code, 404)
+            s3.generate_presigned_url.assert_not_called()
+
+    def test_image_read_failure_does_not_return_broken_link(self):
+        table, s3 = Mock(), Mock()
+        table.query.return_value = {"Items": [report("HEALTHY", 1,
+            image_s3_bucket="grid-guardian-images", image_s3_key="images/photo.webp")]}
+        s3.head_object.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
+        with self.assertLogs(main.logger, "ERROR"):
+            with self.assertRaises(HTTPException) as raised:
+                main.report_image("00901", "HEALTHY-time", table, s3)
+        self.assertEqual(raised.exception.status_code, 503)
+        s3.generate_presigned_url.assert_not_called()
 
     def test_openapi_contract(self):
         schema = main.app.openapi()

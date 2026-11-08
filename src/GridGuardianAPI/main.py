@@ -170,4 +170,49 @@ def map_reports(zipcode: str = Path(pattern=ZIP_PATTERN),
             "total_images": len(reports), "images_without_location": len(reports) - len(features)}
 
 
+@lru_cache
+def get_s3():
+    return boto3.client("s3")
+
+
+@app.get("/reports/{zipcode}/image")
+def report_image(
+    zipcode: str = Path(pattern=ZIP_PATTERN),
+    sort_key: str = Query(min_length=1, max_length=1024),
+    table=Depends(get_table), s3=Depends(get_s3),
+):
+    """Resolve S3 references from a report, never from caller-supplied bucket/key values."""
+    if not any(sort_key.startswith(category + "-") for category in CLASSES):
+        raise HTTPException(404, "Image not found")
+    try:
+        result = table.query(
+            KeyConditionExpression=Key("zipcode").eq(zipcode) & Key("condition-timestamp").eq(sort_key),
+            Limit=1,
+        )
+        items = result.get("Items", [])
+        if not items:
+            raise HTTPException(404, "Report not found")
+        report = items[0]
+        bucket, key = report.get("image_s3_bucket"), report.get("image_s3_key")
+        allowed_bucket = os.getenv("IMAGE_BUCKET", "grid-guardian-images")
+        prefix = os.getenv("IMAGE_PREFIX", "images/")
+        if bucket != allowed_bucket or not isinstance(key, str) or not key.startswith(prefix):
+            raise HTTPException(404, "No image available for this report")
+        params = {"Bucket": bucket, "Key": key}
+        if report.get("image_version_id"):
+            params["VersionId"] = report["image_version_id"]
+        # Verify existence and read permission before returning a link that would fail in the browser.
+        s3.head_object(**params)
+        url = s3.generate_presigned_url("get_object", Params=params, ExpiresIn=300)
+        return {"url": url, "expires_in": 300}
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NoSuchVersion", "NotFound"}:
+            raise HTTPException(404, "Image not found") from exc
+        logger.exception("Failed to access inspection image")
+        raise HTTPException(503, "Image access is temporarily unavailable") from exc
+    except BotoCoreError as exc:
+        logger.exception("Failed to create inspection image link")
+        raise HTTPException(503, "Image access is temporarily unavailable") from exc
+
+
 handler = Mangum(app)

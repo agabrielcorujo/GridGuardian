@@ -38,6 +38,12 @@ resource "aws_iam_role_policy" "api" {
         Resource = aws_dynamodb_table.reports.arn
       },
       {
+        Sid      = "ReadInspectionImages"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = "arn:aws:s3:::grid-guardian-images/images/*"
+      },
+      {
         Sid      = "WriteFunctionLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]

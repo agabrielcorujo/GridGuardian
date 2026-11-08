@@ -107,3 +107,17 @@ uv run python -m unittest discover -v
 Tests use fake DynamoDB pages to check filtering, pagination, control-record
 exclusion, map coordinates, aggregate denominators, validation and failures.
 They do not establish live AWS connectivity or deployed HTTP behavior.
+
+## Inspection images
+
+`GET /reports/{zipcode}/image?sort_key=<condition-timestamp>` looks up the exact
+report and returns `{url, expires_in: 300}` for its original S3 image. The API
+checks object access before signing and preserves `image_version_id` when set.
+Only report-owned references in `IMAGE_BUCKET` (default `grid-guardian-images`)
+and `IMAGE_PREFIX` (default `images/`) can be signed. Missing references/objects
+return 404; AWS access failures return 503. The API role needs `s3:GetObject` and
+`s3:GetObjectVersion` on that image prefix; the accompanying Terraform policy
+adds these permissions. Deploy the API image and policy before using this
+endpoint from the dashboard. Links expire after five minutes; retrying in the
+UI requests a fresh link. No credentials or bucket-public-access changes are
+needed in the browser.
